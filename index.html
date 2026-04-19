@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <title>キュウリ測定VR | XR Blocks</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <link type="text/css" rel="stylesheet" href="https://xrblocks.github.io/css/xr.css" />
+    <script>
+      window.litDisableBundleWarning = true;
+    </script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.182.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.182.0/examples/jsm/",
+          "troika-three-text": "https://cdn.jsdelivr.net/gh/protectwise/troika@028b81cf308f0f22e5aa8e78196be56ec1997af5/packages/troika-three-text/src/index.js",
+          "troika-three-utils": "https://cdn.jsdelivr.net/gh/protectwise/troika@v0.52.4/packages/troika-three-utils/src/index.js",
+          "troika-worker-utils": "https://cdn.jsdelivr.net/gh/protectwise/troika@v0.52.4/packages/troika-worker-utils/src/index.js",
+          "bidi-js": "https://esm.sh/bidi-js@%5E1.0.2?target=es2022",
+          "webgl-sdf-generator": "https://esm.sh/webgl-sdf-generator@1.1.1/es2022/webgl-sdf-generator.mjs",
+          "lit": "https://cdn.jsdelivr.net/gh/lit/dist@3/core/lit-core.min.js",
+          "lit/": "https://esm.run/lit@3/",
+          "xrblocks": "https://cdn.jsdelivr.net/npm/xrblocks@0.11.0/build/xrblocks.js",
+          "xrblocks/addons/": "https://cdn.jsdelivr.net/npm/xrblocks@0.11.0/build/addons/"
+        }
+      }
+    </script>
+  </head>
+
+  <body>
+    <script type="module">
+      import 'xrblocks/addons/simulator/SimulatorAddons.js';
+      import * as THREE from 'three';
+      import * as xb from 'xrblocks';
+      import { TubePainter } from 'three/addons/misc/TubePainter.js';
+
+      /**
+       * 手に持ったキュウリをなぞって測定するXRスクリプト
+       */
+      class CucumberMeasurement extends xb.Script {
+        init() {
+          // 空間の基準となるピボット（ポインター位置）を有効化
+          xb.core.user.enablePivots();
+
+          // 明るめのライトを追加
+          this.add(new THREE.HemisphereLight(0xffffff, 0x888888, 3));
+          const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+          dirLight.position.set(0, 4, 0);
+          this.add(dirLight);
+
+          // 測定データ保持用
+          this.points = [];
+          this.currentPainter = null;
+
+          // UIパネルの構築
+          this.buildUI();
+        }
+
+        buildUI() {
+          // 空間UIパネルを作成
+          this.panel = new xb.SpatialPanel({
+            width: 1.4,
+            height: 0.9,
+            backgroundColor: '#1a2b1aaa' // キュウリをイメージした深緑の半透明
+          });
+          
+          // ユーザーの目の前やや下に配置
+          this.panel.position.set(0, xb.user.height - 0.2, -xb.user.panelDistance);
+          this.add(this.panel);
+
+          const grid = this.panel.addGrid();
+
+          // タイトル
+          grid.addRow({weight: 0.2}).addText({
+            text: '🥒 キュウリ自動測定システム',
+            fontColor: '#2ecc71',
+            fontSize: 0.08
+          });
+
+          // ステータス案内
+          this.statusText = grid.addRow({weight: 0.15}).addText({
+            text: '空中でピンチして、キュウリの形をなぞってください',
+            fontColor: '#ffffff',
+            fontSize: 0.04
+          });
+
+          // 測定結果表示行
+          const dataRow = grid.addRow({weight: 0.35});
+          this.lengthText = dataRow.addCol({weight: 0.5}).addText({
+            text: '長さ: 0.0 cm',
+            fontColor: '#ffffff',
+            fontSize: 0.07
+          });
+          this.bendText = dataRow.addCol({weight: 0.5}).addText({
+            text: '曲がり: 0.0 cm',
+            fontColor: '#ffffff',
+            fontSize: 0.07
+          });
+
+          // 等級判定表示
+          this.gradeText = grid.addRow({weight: 0.3}).addText({
+            text: '判定: -',
+            fontColor: '#f1c40f',
+            fontSize: 0.09
+          });
+        }
+
+        /**
+         * 測定点から「全長」と「最大湾曲」を計算する
+         */
+        calculateMetrics(points) {
+          if (points.length < 2) return { length: 0, maxBend: 0 };
+
+          // 1. 長さの計算（各線分の合計）
+          let totalLength = 0;
+          for (let i = 1; i < points.length; i++) {
+            totalLength += points[i].distanceTo(points[i-1]);
+          }
+
+          // 2. 曲がりの計算（始点と終点を結んだ弦からの最大距離）
+          const start = points[0];
+          const end = points[points.length - 1];
+          const chord = new THREE.Line3(start, end);
+          const closestPoint = new THREE.Vector3();
+          
+          let maxBend = 0;
+          for (let i = 1; i < points.length - 1; i++) {
+            chord.closestPointToPoint(points[i], true, closestPoint);
+            const dist = points[i].distanceTo(closestPoint);
+            if (dist > maxBend) maxBend = dist;
+          }
+
+          return { length: totalLength, maxBend: maxBend };
+        }
+
+        updateUI(isFinal = false) {
+          const metrics = this.calculateMetrics(this.points);
+          // メートルをセンチメートルに変換
+          const lenCm = (metrics.length * 100).toFixed(1);
+          const bendCm = (metrics.maxBend * 100).toFixed(1);
+
+          this.lengthText.setText(`長さ: ${lenCm} cm`);
+          this.bendText.setText(`曲がり: ${bendCm} cm`);
+
+          if (isFinal) {
+            // 日本の一般的な選果基準に基づく簡易な等級判定
+            let grade = 'C等級 (規格外・曲がり大)';
+            if (metrics.maxBend * 100 <= 1.5) {
+              grade = 'A等級 (秀品・真っ直ぐ)';
+              this.gradeText.fontColor = '#2ecc71'; // 緑
+            } else if (metrics.maxBend * 100 <= 3.0) {
+              grade = 'B等級 (優品・少し曲がり)';
+              this.gradeText.fontColor = '#f39c12'; // オレンジ
+            } else {
+              this.gradeText.fontColor = '#e74c3c'; // 赤
+            }
+            
+            this.gradeText.setText(`判定: ${grade}`);
+            this.statusText.setText('測定完了！再度ピンチすると新しく測定します。');
+          } else {
+            this.gradeText.fontColor = '#f1c40f'; // デフォルト色
+            this.gradeText.setText(`測定中...`);
+            this.statusText.setText('キュウリをなぞっています...');
+          }
+        }
+
+        /**
+         * ピンチ開始：新しい測定線を書き始める
+         */
+        onSelectStart(event) {
+          const id = event.target.userData.id;
+          const cursor = xb.core.user.getPivotPosition(id);
+
+          // 古いペインターがあれば削除
+          if (this.currentPainter) {
+            this.remove(this.currentPainter.mesh);
+          }
+
+          // 新しいペインターを作成
+          this.currentPainter = new TubePainter();
+          // キュウリらしい色とサイズに設定
+          this.currentPainter.mesh.material.color.setHex(0x27ae60);
+          this.add(this.currentPainter.mesh);
+
+          this.currentPainter.moveTo(cursor);
+          this.points = [cursor.clone()];
+          this.updateUI();
+        }
+
+        /**
+         * ピンチ中：軌跡を追加して描画と計算を更新
+         */
+        onSelecting(event) {
+          const id = event.target.userData.id;
+          const cursor = xb.core.user.getPivotPosition(id);
+
+          const lastPoint = this.points[this.points.length - 1];
+          // 5mm以上の移動があった場合のみポイントを追加（ノイズ軽減）
+          if (cursor.distanceTo(lastPoint) > 0.005) {
+            this.currentPainter.lineTo(cursor);
+            this.currentPainter.update();
+            this.points.push(cursor.clone());
+            this.updateUI();
+          }
+        }
+
+        /**
+         * ピンチ終了：測定結果を確定し等級を判定
+         */
+        onSelectEnd(event) {
+          if (this.points.length > 2) {
+            this.updateUI(true);
+          } else {
+            this.statusText.setText('短すぎます。最初からやり直してください。');
+          }
+        }
+      }
+
+      // アプリケーションの初期化
+      document.addEventListener('DOMContentLoaded', function () {
+        const options = new xb.Options();
+        options.setAppTitle('Cucumber Tracker');
+        
+        // UIとハンドトラッキングの有効化
+        options.enableUI();
+        options.enableHands();
+        options.hands.enabled = true;
+        options.hands.visualization = true; // 自分の手を表示
+        options.simulator.defaultMode = xb.SimulatorMode.POSE;
+
+        xb.add(new CucumberMeasurement());
+        xb.init(options);
+      });
+    </script>
+  </body>
+</html>
