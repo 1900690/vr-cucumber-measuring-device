@@ -179,19 +179,23 @@
             let gradeStr = '規格外';
             let colorHex = 0x222222; // 黒（真っ黒だと見えなくなるため暗いグレー）
             let textColor = '#aaaaaa'; // 文字色はグレー
+            let panelBgColor = '#222222aa'; // パネルの背景色（暗いグレーの半透明）
 
             if (finalGrade === 4) {
               gradeStr = 'A品';
               colorHex = 0x2ecc71; // 緑
               textColor = '#2ecc71';
+              panelBgColor = '#2ecc71aa';
             } else if (finalGrade === 3) {
               gradeStr = 'B品';
               colorHex = 0xf1c40f; // 黄色
               textColor = '#f1c40f';
+              panelBgColor = '#f1c40faa';
             } else if (finalGrade === 2) {
               gradeStr = 'C品';
               colorHex = 0xe74c3c; // 赤
               textColor = '#e74c3c';
+              panelBgColor = '#e74c3caa';
             }
 
             this.gradeText.fontColor = textColor;
@@ -202,10 +206,22 @@
             if (this.currentPainter && this.currentPainter.mesh) {
               this.currentPainter.mesh.material.color.setHex(colorHex);
             }
+            
+            // パネル自体の背景色を判定結果に変更
+            if (this.panel) {
+              this.panel.backgroundColor = panelBgColor;
+              if (this.panel.updateLayouts) this.panel.updateLayouts();
+            }
           } else {
             this.gradeText.fontColor = '#ffffff';
             this.gradeText.setText(`測定中...`);
             this.statusText.setText('キュウリをなぞっています...');
+            
+            // 測定中はパネルの背景色を元に戻す
+            if (this.panel) {
+              this.panel.backgroundColor = '#1a2b1aaa';
+              if (this.panel.updateLayouts) this.panel.updateLayouts();
+            }
           }
         }
 
