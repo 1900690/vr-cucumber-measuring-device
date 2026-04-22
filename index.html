@@ -63,8 +63,6 @@
             backgroundColor: '#1a2b1aaa' // キュウリをイメージした深緑の半透明
           });
           
-          // ユーザーの目の前やや下に配置
-          this.panel.position.set(0, xb.user.height - 0.2, -xb.user.panelDistance);
           this.add(this.panel);
 
           const grid = this.panel.addGrid();
@@ -99,9 +97,27 @@
           // 等級判定表示
           this.gradeText = grid.addRow({weight: 0.3}).addText({
             text: '判定: -',
-            fontColor: '#f1c40f',
+            fontColor: '#ffffff',
             fontSize: 0.09
           });
+        }
+
+        /**
+         * 毎フレーム呼ばれる更新処理（頭の動きに合わせてUIを追従させる）
+         */
+        update() {
+          super.update();
+          if (this.panel) {
+            const camera = xb.core.camera;
+            
+            // カメラの前方パネル距離の位置を計算
+            const targetPos = new THREE.Vector3(0, -0.2, -xb.user.panelDistance);
+            targetPos.applyMatrix4(camera.matrixWorld);
+            
+            // パネルの位置と回転をカメラに滑らかに追従させる（lerp/slerp）
+            this.panel.position.lerp(targetPos, 0.1);
+            this.panel.quaternion.slerp(camera.quaternion, 0.1);
+          }
         }
 
         /**
@@ -135,29 +151,59 @@
         updateUI(isFinal = false) {
           const metrics = this.calculateMetrics(this.points);
           // メートルをセンチメートルに変換
-          const lenCm = (metrics.length * 100).toFixed(1);
-          const bendCm = (metrics.maxBend * 100).toFixed(1);
+          const lenCm = parseFloat((metrics.length * 100).toFixed(1));
+          const bendCm = parseFloat((metrics.maxBend * 100).toFixed(1));
 
-          this.lengthText.setText(`長さ: ${lenCm} cm`);
-          this.bendText.setText(`曲がり: ${bendCm} cm`);
+          this.lengthText.setText(`長さ: ${lenCm.toFixed(1)} cm`);
+          this.bendText.setText(`曲がり: ${bendCm.toFixed(1)} cm`);
 
           if (isFinal) {
-            // 日本の一般的な選果基準に基づく簡易な等級判定
-            let grade = 'C等級 (規格外・曲がり大)';
-            if (metrics.maxBend * 100 <= 1.5) {
-              grade = 'A等級 (秀品・真っ直ぐ)';
-              this.gradeText.fontColor = '#2ecc71'; // 緑
-            } else if (metrics.maxBend * 100 <= 3.0) {
-              grade = 'B等級 (優品・少し曲がり)';
-              this.gradeText.fontColor = '#f39c12'; // オレンジ
-            } else {
-              this.gradeText.fontColor = '#e74c3c'; // 赤
-            }
+            // 等級を数値化して評価（4: A品, 3: B品, 2: C品, 1: 規格外）
             
-            this.gradeText.setText(`判定: ${grade}`);
+            // 1. 曲がりの判定
+            let bendGrade = 1; // 初期値は規格外
+            if (bendCm <= 1.5) bendGrade = 4;
+            else if (bendCm <= 3.0) bendGrade = 3;
+            else if (bendCm <= 5.0) bendGrade = 2;
+
+            // 2. 長さの判定
+            // ※「それ以上は規格外」という要件から、上限を25cmと仮定しています。
+            let lengthGrade = 1; // 初期値は規格外
+            if (lenCm >= 20.0 && lenCm <= 25.0) lengthGrade = 4; // A品
+            else if (lenCm >= 15.0 && lenCm < 20.0) lengthGrade = 3; // B品
+            // それ以下(15cm未満)、それ以上(25cm超) は 1(規格外) のまま
+
+            // 3. 低い方の基準を採用
+            const finalGrade = Math.min(bendGrade, lengthGrade);
+
+            let gradeStr = '規格外';
+            let colorHex = 0x222222; // 黒（真っ黒だと見えなくなるため暗いグレー）
+            let textColor = '#aaaaaa'; // 文字色はグレー
+
+            if (finalGrade === 4) {
+              gradeStr = 'A品';
+              colorHex = 0x2ecc71; // 緑
+              textColor = '#2ecc71';
+            } else if (finalGrade === 3) {
+              gradeStr = 'B品';
+              colorHex = 0xf1c40f; // 黄色
+              textColor = '#f1c40f';
+            } else if (finalGrade === 2) {
+              gradeStr = 'C品';
+              colorHex = 0xe74c3c; // 赤
+              textColor = '#e74c3c';
+            }
+
+            this.gradeText.fontColor = textColor;
+            this.gradeText.setText(`判定: ${gradeStr}`);
             this.statusText.setText('測定完了！再度ピンチすると新しく測定します。');
+
+            // 描画されたキュウリの色を判定結果に変更
+            if (this.currentPainter && this.currentPainter.mesh) {
+              this.currentPainter.mesh.material.color.setHex(colorHex);
+            }
           } else {
-            this.gradeText.fontColor = '#f1c40f'; // デフォルト色
+            this.gradeText.fontColor = '#ffffff';
             this.gradeText.setText(`測定中...`);
             this.statusText.setText('キュウリをなぞっています...');
           }
@@ -177,7 +223,7 @@
 
           // 新しいペインターを作成
           this.currentPainter = new TubePainter();
-          // キュウリらしい色とサイズに設定
+          // 測定中は仮の緑色
           this.currentPainter.mesh.material.color.setHex(0x27ae60);
           this.add(this.currentPainter.mesh);
 
@@ -194,7 +240,7 @@
           const cursor = xb.core.user.getPivotPosition(id);
 
           const lastPoint = this.points[this.points.length - 1];
-          // 5mm以上の移動があった場合のみポイントを追加（ノイズ軽減）
+          // 5mm以上の移動があった場合のみポイントを追加（手のブレ・ノイズ軽減）
           if (cursor.distanceTo(lastPoint) > 0.005) {
             this.currentPainter.lineTo(cursor);
             this.currentPainter.update();
