@@ -3,6 +3,18 @@
   <head>
     <title>キュウリ測定VR | XR Blocks</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    
+    <link rel="manifest" href="./manifest.json" />
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./sw.js')
+            .then((registration) => { console.log('ServiceWorker 登録完了'); })
+            .catch((err) => { console.log('ServiceWorker 登録失敗: ', err); });
+        });
+      }
+    </script>
+
     <link type="text/css" rel="stylesheet" href="https://xrblocks.github.io/css/xr.css" />
     <script>
       window.litDisableBundleWarning = true;
@@ -250,9 +262,8 @@
         // --- 右手でのみ「なぞる（描画）」動作を許可する ---
 
         onSelectStart(event) {
-          // 左手の場合は無視（右手またはシミュレーター操作でのみ描画する）
           if (event.data && event.data.handedness === 'left') return;
-          if (this.isPainting) return; // 既に描画中なら無視
+          if (this.isPainting) return;
 
           const id = event.target.userData.id;
           const cursor = xb.core.user.getPivotPosition(id);
@@ -273,7 +284,6 @@
 
         onSelecting(event) {
           if (!this.isPainting) return;
-          // 左手の場合は無視
           if (event.data && event.data.handedness === 'left') return;
 
           const id = event.target.userData.id;
@@ -290,7 +300,6 @@
 
         onSelectEnd(event) {
           if (!this.isPainting) return;
-          // 左手の場合は無視
           if (event.data && event.data.handedness === 'left') return;
 
           this.isPainting = false;
@@ -308,11 +317,10 @@
         const options = new xb.Options();
         options.setAppTitle('Cucumber Measurement VR');
         
-        // UIとハンドトラッキングの有効化
         options.enableUI();
         options.enableHands();
         options.hands.enabled = true;
-        options.hands.visualization = true; // 自分の手を表示
+        options.hands.visualization = true; 
         options.simulator.defaultMode = xb.SimulatorMode.POSE;
 
         xb.add(new CucumberMeasurement());
