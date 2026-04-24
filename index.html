@@ -120,7 +120,7 @@
           // 1. パネルをカメラの向きに合わせて追従させる
           if (this.panel) {
             const camera = xb.core.camera;
-            const targetPos = new THREE.Vector3(0, 0.5, -xb.user.panelDistance);
+            const targetPos = new THREE.Vector3(0, 0.5, -xb.core.user.panelDistance);
             targetPos.applyMatrix4(camera.matrixWorld);
             this.panel.position.lerp(targetPos, 0.1);
             this.panel.quaternion.slerp(camera.quaternion, 0.1);
@@ -134,7 +134,7 @@
          * 左手の親指(thumb-tip)と人差し指(index-finger-tip)の距離を計算してUIに表示する
          */
         updatePinchWidth() {
-          const userHands = xb.user.hands;
+          const userHands = xb.core.user.hands;
           if (userHands && userHands.hands && userHands.hands.length > 0) {
             // XR Blocksでは通常、hands[0] が左手、hands[1] が右手に割り当てられます
             const leftHand = userHands.hands[0];
@@ -273,6 +273,7 @@
 
         onSelecting(event) {
           if (!this.isPainting) return;
+          // 左手の場合は無視
           if (event.data && event.data.handedness === 'left') return;
 
           const id = event.target.userData.id;
@@ -289,6 +290,7 @@
 
         onSelectEnd(event) {
           if (!this.isPainting) return;
+          // 左手の場合は無視
           if (event.data && event.data.handedness === 'left') return;
 
           this.isPainting = false;
