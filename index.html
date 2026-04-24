@@ -34,7 +34,7 @@
       import { TubePainter } from 'three/addons/misc/TubePainter.js';
 
       /**
-       * 手に持ったキュウリをなぞって測定するXRスクリプト
+       * 手に持ったキュウリをなぞって長さを測定し、指で挟んで幅を測定するXRスクリプト
        */
       class CucumberMeasurement extends xb.Script {
         init() {
@@ -76,22 +76,30 @@
 
           // ステータス案内
           this.statusText = grid.addRow({weight: 0.15}).addText({
-            text: '空中でピンチして、キュウリの形をなぞってください',
+            text: '形をなぞり、指で挟んで太さを測ります',
             fontColor: '#ffffff',
             fontSize: 0.04
           });
 
-          // 測定結果表示行
-          const dataRow = grid.addRow({weight: 0.35});
-          this.lengthText = dataRow.addCol({weight: 0.5}).addText({
+          // 測定結果表示行（長さと曲がり）
+          const dataRow1 = grid.addRow({weight: 0.2});
+          this.lengthText = dataRow1.addCol({weight: 0.5}).addText({
             text: '長さ: 0.0 cm',
             fontColor: '#ffffff',
-            fontSize: 0.07
+            fontSize: 0.1
           });
-          this.bendText = dataRow.addCol({weight: 0.5}).addText({
+          this.bendText = dataRow1.addCol({weight: 0.5}).addText({
             text: '曲がり: 0.0 cm',
             fontColor: '#ffffff',
-            fontSize: 0.07
+            fontSize: 0.1
+          });
+
+          // 追加: 指の幅をリアルタイムで表示するテキスト（長さ・曲がりの下）
+          const dataRow2 = grid.addRow({weight: 0.15});
+          this.widthText = dataRow2.addCol({weight: 1.0}).addText({
+            text: '太さ(幅): - cm',
+            fontColor: '#f1c40f',
+            fontSize: 0.08
           });
 
           // 等級判定表示
@@ -103,21 +111,49 @@
         }
 
         /**
-         * 毎フレーム呼ばれる更新処理（頭の動きに合わせてUIを追従させる）
+         * 毎フレーム呼ばれる更新処理（頭の動きへの追従 ＋ 指の幅のリアルタイム測定）
          */
         update() {
           super.update();
+
+          // 1. パネルをカメラの向きに合わせて追従させる
           if (this.panel) {
             const camera = xb.core.camera;
-            
-            // カメラの前方パネル距離の位置を計算
             const targetPos = new THREE.Vector3(0, -0.2, -xb.user.panelDistance);
             targetPos.applyMatrix4(camera.matrixWorld);
-            
-            // パネルの位置と回転をカメラに滑らかに追従させる（lerp/slerp）
             this.panel.position.lerp(targetPos, 0.1);
             this.panel.quaternion.slerp(camera.quaternion, 0.1);
           }
+
+          // 2. ハンドトラッキングで親指と人差し指の距離（幅）を計算
+          this.updatePinchWidth();
+        }
+
+        /**
+         * 親指(thumb-tip)と人差し指(index-finger-tip)の距離を計算してUIに表示する
+         */
+        updatePinchWidth() {
+          const userHands = xb.user.hands;
+          if (userHands && userHands.hands && userHands.hands.length > 0) {
+            // 検出されている手のうち、ジョイント情報が有効なものを探す
+            for (let i = 0; i < userHands.hands.length; i++) {
+              const joints = userHands.hands[i].joints;
+              // 親指と人差し指の先端のジョイントがあるか確認
+              if (joints && joints['thumb-tip'] && joints['index-finger-tip']) {
+                const thumbTip = joints['thumb-tip'].position;
+                const indexTip = joints['index-finger-tip'].position;
+                
+                // 距離を計算 (m -> cm)
+                const distance = thumbTip.distanceTo(indexTip);
+                const widthCm = (distance * 100).toFixed(1);
+                
+                this.widthText.setText(`太さ(幅): ${widthCm} cm`);
+                return; // 見つかったらループ終了
+              }
+            }
+          }
+          // 手がトラッキングされていない場合
+          this.widthText.setText(`太さ(幅): - cm`);
         }
 
         /**
@@ -126,13 +162,11 @@
         calculateMetrics(points) {
           if (points.length < 2) return { length: 0, maxBend: 0 };
 
-          // 1. 長さの計算（各線分の合計）
           let totalLength = 0;
           for (let i = 1; i < points.length; i++) {
             totalLength += points[i].distanceTo(points[i-1]);
           }
 
-          // 2. 曲がりの計算（始点と終点を結んだ弦からの最大距離）
           const start = points[0];
           const end = points[points.length - 1];
           const chord = new THREE.Line3(start, end);
@@ -150,7 +184,6 @@
 
         updateUI(isFinal = false) {
           const metrics = this.calculateMetrics(this.points);
-          // メートルをセンチメートルに変換
           const lenCm = parseFloat((metrics.length * 100).toFixed(1));
           const bendCm = parseFloat((metrics.maxBend * 100).toFixed(1));
 
@@ -158,30 +191,28 @@
           this.bendText.setText(`曲がり: ${bendCm.toFixed(1)} cm`);
 
           if (isFinal) {
-            // 1. 曲がりの判定 (A, B, C, 規格外) と 色の設定
             let bendStr = '規格外';
-            let colorHex = 0x888888; // 規格外はグレー
+            let colorHex = 0x888888;
             let textColor = '#aaaaaa';
             let panelBgColor = '#333333aa';
 
             if (bendCm <= 1.5) {
               bendStr = 'A';
-              colorHex = 0x2ecc71; // 緑
+              colorHex = 0x2ecc71;
               textColor = '#2ecc71';
               panelBgColor = '#2ecc71aa';
             } else if (bendCm <= 3.0) {
               bendStr = 'B';
-              colorHex = 0xf1c40f; // 黄色
+              colorHex = 0xf1c40f;
               textColor = '#f1c40f';
               panelBgColor = '#f1c40faa';
             } else if (bendCm <= 5.0) {
               bendStr = 'C';
-              colorHex = 0xe74c3c; // 赤
+              colorHex = 0xe74c3c;
               textColor = '#e74c3c';
               panelBgColor = '#e74c3caa';
             }
 
-            // 2. 長さの判定 (S, M, L)
             let lengthStr = '';
             if (lenCm < 19.0) {
               lengthStr = 'S';
@@ -191,36 +222,25 @@
               lengthStr = 'L';
             }
 
-            // 3. 長さと曲がりの表示を組み合わせる ("AL品" など)
-            let gradeStr = '';
-            if (bendStr === '規格外') {
-              gradeStr = `規格外`;
-            } else {
-              gradeStr = `${bendStr}${lengthStr}品`;
-            }
+            let gradeStr = bendStr === '規格外' ? `規格外` : `${bendStr}${lengthStr}品`;
 
-            // テキストとステータスの更新
             this.gradeText.fontColor = textColor;
             this.gradeText.setText(`判定: ${gradeStr}`);
             this.statusText.setText('測定完了！再度ピンチすると新しく測定します。');
 
-            // 描画されたキュウリの色を「曲がりの基準」に変更
             if (this.currentPainter && this.currentPainter.mesh) {
               this.currentPainter.mesh.material.color.setHex(colorHex);
             }
             
-            // パネル自体の背景色も曲がりの判定結果に合わせる
             if (this.panel) {
               this.panel.backgroundColor = panelBgColor;
               if (this.panel.updateLayouts) this.panel.updateLayouts();
             }
           } else {
-            // 測定中の表示リセット
             this.gradeText.fontColor = '#ffffff';
             this.gradeText.setText(`測定中...`);
             this.statusText.setText('キュウリをなぞっています...');
             
-            // 測定中はパネルの背景色をデフォルトに戻す
             if (this.panel) {
               this.panel.backgroundColor = '#1a2b1aaa';
               if (this.panel.updateLayouts) this.panel.updateLayouts();
@@ -228,21 +248,15 @@
           }
         }
 
-        /**
-         * ピンチ開始：新しい測定線を書き始める
-         */
         onSelectStart(event) {
           const id = event.target.userData.id;
           const cursor = xb.core.user.getPivotPosition(id);
 
-          // 古いペインターがあれば削除
           if (this.currentPainter) {
             this.remove(this.currentPainter.mesh);
           }
 
-          // 新しいペインターを作成
           this.currentPainter = new TubePainter();
-          // 測定中は仮の緑色
           this.currentPainter.mesh.material.color.setHex(0x27ae60);
           this.add(this.currentPainter.mesh);
 
@@ -251,15 +265,11 @@
           this.updateUI();
         }
 
-        /**
-         * ピンチ中：軌跡を追加して描画と計算を更新
-         */
         onSelecting(event) {
           const id = event.target.userData.id;
           const cursor = xb.core.user.getPivotPosition(id);
 
           const lastPoint = this.points[this.points.length - 1];
-          // 5mm以上の移動があった場合のみポイントを追加（手のブレ・ノイズ軽減）
           if (cursor.distanceTo(lastPoint) > 0.005) {
             this.currentPainter.lineTo(cursor);
             this.currentPainter.update();
@@ -268,9 +278,6 @@
           }
         }
 
-        /**
-         * ピンチ終了：測定結果を確定し等級を判定
-         */
         onSelectEnd(event) {
           if (this.points.length > 2) {
             this.updateUI(true);
@@ -283,7 +290,7 @@
       // アプリケーションの初期化
       document.addEventListener('DOMContentLoaded', function () {
         const options = new xb.Options();
-        options.setAppTitle('Cucumber Tracker');
+        options.setAppTitle('Cucumber Measurement VR');
         
         // UIとハンドトラッキングの有効化
         options.enableUI();
