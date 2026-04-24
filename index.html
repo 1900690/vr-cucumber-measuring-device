@@ -158,66 +158,69 @@
           this.bendText.setText(`曲がり: ${bendCm.toFixed(1)} cm`);
 
           if (isFinal) {
-            // 等級を数値化して評価（4: A品, 3: B品, 2: C品, 1: 規格外）
-            
-            // 1. 曲がりの判定
-            let bendGrade = 1; // 初期値は規格外
-            if (bendCm <= 1.5) bendGrade = 4;
-            else if (bendCm <= 3.0) bendGrade = 3;
-            else if (bendCm <= 5.0) bendGrade = 2;
+            // 1. 曲がりの判定 (A, B, C, 規格外) と 色の設定
+            let bendStr = '規格外';
+            let colorHex = 0x888888; // 規格外はグレー
+            let textColor = '#aaaaaa';
+            let panelBgColor = '#333333aa';
 
-            // 2. 長さの判定
-            // ※「それ以上は規格外」という要件から、上限を25cmと仮定しています。
-            let lengthGrade = 1; // 初期値は規格外
-            if (lenCm >= 20.0 && lenCm <= 25.0) lengthGrade = 4; // A品
-            else if (lenCm >= 15.0 && lenCm < 20.0) lengthGrade = 3; // B品
-            // それ以下(15cm未満)、それ以上(25cm超) は 1(規格外) のまま
-
-            // 3. 低い方の基準を採用
-            const finalGrade = Math.min(bendGrade, lengthGrade);
-
-            let gradeStr = '規格外';
-            let colorHex = 0x222222; // 黒（真っ黒だと見えなくなるため暗いグレー）
-            let textColor = '#aaaaaa'; // 文字色はグレー
-            let panelBgColor = '#222222aa'; // パネルの背景色（暗いグレーの半透明）
-
-            if (finalGrade === 4) {
-              gradeStr = 'A品';
+            if (bendCm <= 1.5) {
+              bendStr = 'A';
               colorHex = 0x2ecc71; // 緑
               textColor = '#2ecc71';
               panelBgColor = '#2ecc71aa';
-            } else if (finalGrade === 3) {
-              gradeStr = 'B品';
+            } else if (bendCm <= 3.0) {
+              bendStr = 'B';
               colorHex = 0xf1c40f; // 黄色
               textColor = '#f1c40f';
               panelBgColor = '#f1c40faa';
-            } else if (finalGrade === 2) {
-              gradeStr = 'C品';
+            } else if (bendCm <= 5.0) {
+              bendStr = 'C';
               colorHex = 0xe74c3c; // 赤
               textColor = '#e74c3c';
               panelBgColor = '#e74c3caa';
             }
 
+            // 2. 長さの判定 (S, M, L)
+            let lengthStr = '';
+            if (lenCm < 19.0) {
+              lengthStr = 'S';
+            } else if (lenCm < 22.0) {
+              lengthStr = 'M';
+            } else {
+              lengthStr = 'L';
+            }
+
+            // 3. 長さと曲がりの表示を組み合わせる ("AL品" など)
+            let gradeStr = '';
+            if (bendStr === '規格外') {
+              gradeStr = `規格外`;
+            } else {
+              gradeStr = `${bendStr}${lengthStr}品`;
+            }
+
+            // テキストとステータスの更新
             this.gradeText.fontColor = textColor;
             this.gradeText.setText(`判定: ${gradeStr}`);
             this.statusText.setText('測定完了！再度ピンチすると新しく測定します。');
 
-            // 描画されたキュウリの色を判定結果に変更
+            // 描画されたキュウリの色を「曲がりの基準」に変更
             if (this.currentPainter && this.currentPainter.mesh) {
               this.currentPainter.mesh.material.color.setHex(colorHex);
             }
             
-            // パネル自体の背景色を判定結果に変更
+            // パネル自体の背景色も曲がりの判定結果に合わせる
             if (this.panel) {
               this.panel.backgroundColor = panelBgColor;
               if (this.panel.updateLayouts) this.panel.updateLayouts();
             }
           } else {
+            // 測定中の表示リセット
             this.gradeText.fontColor = '#ffffff';
             this.gradeText.setText(`測定中...`);
             this.statusText.setText('キュウリをなぞっています...');
             
-            // 測定中はパネルの背景色を元に戻す
+            // 測定中はパネルの背景色をデフォルトに戻す
             if (this.panel) {
               this.panel.backgroundColor = '#1a2b1aaa';
               if (this.panel.updateLayouts) this.panel.updateLayouts();
