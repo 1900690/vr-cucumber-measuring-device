@@ -34,7 +34,7 @@
       import { TubePainter } from 'three/addons/misc/TubePainter.js';
 
       /**
-       * 手に持ったキュウリをなぞって長さを測定し、指で挟んで幅を測定するXRスクリプト
+       * 右手でなぞって長さを測定し、左手で挟んで幅を測定するXRスクリプト
        */
       class CucumberMeasurement extends xb.Script {
         init() {
@@ -50,6 +50,7 @@
           // 測定データ保持用
           this.points = [];
           this.currentPainter = null;
+          this.isPainting = false;
 
           // UIパネルの構築
           this.buildUI();
@@ -76,7 +77,7 @@
 
           // ステータス案内
           this.statusText = grid.addRow({weight: 0.15}).addText({
-            text: '形をなぞり、指で挟んで太さを測ります',
+            text: '右手で形をなぞり、左手で挟んで太さを測ります',
             fontColor: '#ffffff',
             fontSize: 0.04
           });
@@ -94,10 +95,10 @@
             fontSize: 0.1
           });
 
-          // 追加: 指の幅をリアルタイムで表示するテキスト（長さ・曲がりの下）
+          // 指の幅をリアルタイムで表示するテキスト（長さ・曲がりの下）
           const dataRow2 = grid.addRow({weight: 0.15});
           this.widthText = dataRow2.addCol({weight: 1.0}).addText({
-            text: '太さ(幅): - cm',
+            text: '太さ(左手): - cm',
             fontColor: '#f1c40f',
             fontSize: 0.08
           });
@@ -111,7 +112,7 @@
         }
 
         /**
-         * 毎フレーム呼ばれる更新処理（頭の動きへの追従 ＋ 指の幅のリアルタイム測定）
+         * 毎フレーム呼ばれる更新処理（頭の動きへの追従 ＋ 左手の指の幅のリアルタイム測定）
          */
         update() {
           super.update();
@@ -125,35 +126,33 @@
             this.panel.quaternion.slerp(camera.quaternion, 0.1);
           }
 
-          // 2. ハンドトラッキングで親指と人差し指の距離（幅）を計算
+          // 2. ハンドトラッキングで左手の親指と人差し指の距離（幅）を計算
           this.updatePinchWidth();
         }
 
         /**
-         * 親指(thumb-tip)と人差し指(index-finger-tip)の距離を計算してUIに表示する
+         * 左手の親指(thumb-tip)と人差し指(index-finger-tip)の距離を計算してUIに表示する
          */
         updatePinchWidth() {
           const userHands = xb.user.hands;
           if (userHands && userHands.hands && userHands.hands.length > 0) {
-            // 検出されている手のうち、ジョイント情報が有効なものを探す
-            for (let i = 0; i < userHands.hands.length; i++) {
-              const joints = userHands.hands[i].joints;
-              // 親指と人差し指の先端のジョイントがあるか確認
-              if (joints && joints['thumb-tip'] && joints['index-finger-tip']) {
-                const thumbTip = joints['thumb-tip'].position;
-                const indexTip = joints['index-finger-tip'].position;
-                
-                // 距離を計算 (m -> cm)
-                const distance = thumbTip.distanceTo(indexTip);
-                const widthCm = (distance * 100).toFixed(1);
-                
-                this.widthText.setText(`太さ(幅): ${widthCm} cm`);
-                return; // 見つかったらループ終了
-              }
+            // XR Blocksでは通常、hands[0] が左手、hands[1] が右手に割り当てられます
+            const leftHand = userHands.hands[0];
+            
+            if (leftHand && leftHand.joints && leftHand.joints['thumb-tip'] && leftHand.joints['index-finger-tip']) {
+              const thumbTip = leftHand.joints['thumb-tip'].position;
+              const indexTip = leftHand.joints['index-finger-tip'].position;
+              
+              // 距離を計算 (m -> cm)
+              const distance = thumbTip.distanceTo(indexTip);
+              const widthCm = (distance * 100).toFixed(1);
+              
+              this.widthText.setText(`太さ(左手): ${widthCm} cm`);
+              return;
             }
           }
           // 手がトラッキングされていない場合
-          this.widthText.setText(`太さ(幅): - cm`);
+          this.widthText.setText(`太さ(左手): - cm`);
         }
 
         /**
@@ -226,7 +225,7 @@
 
             this.gradeText.fontColor = textColor;
             this.gradeText.setText(`判定: ${gradeStr}`);
-            this.statusText.setText('測定完了！再度ピンチすると新しく測定します。');
+            this.statusText.setText('測定完了！右手で再度ピンチすると新しく測定します。');
 
             if (this.currentPainter && this.currentPainter.mesh) {
               this.currentPainter.mesh.material.color.setHex(colorHex);
@@ -239,7 +238,7 @@
           } else {
             this.gradeText.fontColor = '#ffffff';
             this.gradeText.setText(`測定中...`);
-            this.statusText.setText('キュウリをなぞっています...');
+            this.statusText.setText('右手でキュウリをなぞっています...');
             
             if (this.panel) {
               this.panel.backgroundColor = '#1a2b1aaa';
@@ -248,7 +247,13 @@
           }
         }
 
+        // --- 右手でのみ「なぞる（描画）」動作を許可する ---
+
         onSelectStart(event) {
+          // 左手の場合は無視（右手またはシミュレーター操作でのみ描画する）
+          if (event.data && event.data.handedness === 'left') return;
+          if (this.isPainting) return; // 既に描画中なら無視
+
           const id = event.target.userData.id;
           const cursor = xb.core.user.getPivotPosition(id);
 
@@ -262,10 +267,14 @@
 
           this.currentPainter.moveTo(cursor);
           this.points = [cursor.clone()];
+          this.isPainting = true;
           this.updateUI();
         }
 
         onSelecting(event) {
+          if (!this.isPainting) return;
+          if (event.data && event.data.handedness === 'left') return;
+
           const id = event.target.userData.id;
           const cursor = xb.core.user.getPivotPosition(id);
 
@@ -279,10 +288,15 @@
         }
 
         onSelectEnd(event) {
+          if (!this.isPainting) return;
+          if (event.data && event.data.handedness === 'left') return;
+
+          this.isPainting = false;
+
           if (this.points.length > 2) {
             this.updateUI(true);
           } else {
-            this.statusText.setText('短すぎます。最初からやり直してください。');
+            this.statusText.setText('短すぎます。右手で最初からやり直してください。');
           }
         }
       }
