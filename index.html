@@ -132,7 +132,7 @@
           // 1. パネルをカメラの向きに合わせて追従させる
           if (this.panel) {
             const camera = xb.core.camera;
-            const targetPos = new THREE.Vector3(0, -0.2, -xb.core.user.panelDistance);
+            const targetPos = new THREE.Vector3(0, 0.5, -xb.core.user.panelDistance);
             targetPos.applyMatrix4(camera.matrixWorld);
             this.panel.position.lerp(targetPos, 0.1);
             this.panel.quaternion.slerp(camera.quaternion, 0.1);
